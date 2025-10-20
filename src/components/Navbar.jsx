@@ -27,7 +27,7 @@ export default function Navbar() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div className="brand-cube" />
-          <div className="heading">Mental Health AI</div>
+          <div className="heading">Camila AI </div>
         </div>
         <div className="nav-links">
           {links.map(({ to, label }) => (
