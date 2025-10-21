@@ -1,160 +1,323 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  uploadDocument,
+import React, { useState, useEffect } from 'react';
+import { Upload, File, Trash2, Eye, Download, CheckCircle, AlertCircle } from 'lucide-react';
+import { 
+  uploadDocument, 
+  getDocuments, 
+  deleteDocument, 
   extractKeywordsFromDocument,
-  listDocuments,
-  getDocument,
-  upsertSymptomKeywords
-} from "../services/api";
-
-const SYMPTOM_TYPES = ["depression", "anxiety", "stress", "insomnia", "irritability"];
+  getDocumentKeywords,
+  processDocument,
+  downloadDocument
+} from '../services/api';
+import toast from 'react-hot-toast';
 
 export default function DocumentUpload() {
-  const [file, setFile] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [docs, setDocs] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
-  const [docKeywords, setDocKeywords] = useState([]);
-  const [mapping, setMapping] = useState({});
-  const [saving, setSaving] = useState(false);
-
-  async function refreshDocs() {
-    const items = await listDocuments(50, 0, "angel-acv");
-    setDocs(items || []);
-  }
+  const [keywords, setKeywords] = useState([]);
 
   useEffect(() => {
-    refreshDocs();
+    loadDocuments();
   }, []);
 
-  const canSave = useMemo(() => Object.keys(mapping).length > 0, [mapping]);
-
-  async function handleUpload() {
-    if (!file) return;
-    setUploading(true);
+  const loadDocuments = async () => {
     try {
-      const res = await uploadDocument(file, "angel-acv", file.name);
-      await refreshDocs();
-      setSelectedDoc(res.document_id);
-      await extractKeywordsFromDocument(res.document_id, 80);
-      const full = await getDocument(res.document_id);
-      setDocKeywords(full.keywords || []);
-    } catch (e) {
-      alert(e.message || "Error subiendo documento");
+      setLoading(true);
+      const data = await getDocuments();
+      setDocuments(data || []);
+    } catch (error) {
+      console.error('Error al cargar documentos:', error);
+      toast.error('Error al cargar documentos');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validar tamaño (máximo 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error('El archivo es demasiado grande. Máximo 10MB');
+        return;
+      }
+
+      // Validar tipo de archivo
+      const allowedTypes = [
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword',
+        'text/plain',
+        'text/markdown'
+      ];
+
+      if (!allowedTypes.includes(file.type)) {
+        toast.error('Tipo de archivo no permitido. Solo PDF, Word, TXT y Markdown');
+        return;
+      }
+
+      setSelectedFile(file);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      toast.error('Selecciona un archivo primero');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const metadata = {
+        title: selectedFile.name,
+        description: 'Documento subido desde la interfaz'
+      };
+
+      await uploadDocument(selectedFile, metadata);
+      toast.success('Documento subido exitosamente');
+      setSelectedFile(null);
+      loadDocuments();
+      
+      // Reset file input
+      const fileInput = document.getElementById('file-input');
+      if (fileInput) fileInput.value = '';
+    } catch (error) {
+      console.error('Error al subir documento:', error);
+      toast.error('Error al subir documento');
     } finally {
       setUploading(false);
     }
-  }
+  };
 
-  async function handleSelectDoc(id) {
-    setSelectedDoc(id);
-    const full = await getDocument(id);
-    setDocKeywords(full.keywords || []);
-  }
-
-  async function handleApplyToLexicon() {
-    if (!selectedDoc) return;
-    setSaving(true);
-    try {
-      const items = Object.entries(mapping).map(([kw, st]) => ({
-        keyword: kw.toLowerCase(),
-        symptom_type: st,
-        weight: Math.min(1.0, Math.max(0.1, (docKeywords.find((k) => k.keyword === kw)?.weight || 0.2) * 1.2)),
-        source: "doc",
-        active: true
-      }));
-      const res = await upsertSymptomKeywords(items);
-      alert(`Actualizado léxico: insertados ${res.inserted}, actualizados ${res.updated}`);
-      setMapping({});
-    } catch (e) {
-      alert(e.message || "Error aplicando al léxico");
-    } finally {
-      setSaving(false);
+  const handleDelete = async (docId) => {
+    if (!confirm('¿Estás seguro de que quieres eliminar este documento?')) {
+      return;
     }
+
+    try {
+      await deleteDocument(docId);
+      toast.success('Documento eliminado');
+      loadDocuments();
+    } catch (error) {
+      console.error('Error al eliminar documento:', error);
+      toast.error('Error al eliminar documento');
+    }
+  };
+
+  const handleExtractKeywords = async (docId) => {
+    try {
+      const result = await extractKeywordsFromDocument(docId);
+      toast.success('Palabras clave extraídas exitosamente');
+      
+      // Cargar palabras clave
+      const keywordsData = await getDocumentKeywords(docId);
+      setKeywords(keywordsData || []);
+      
+      loadDocuments();
+    } catch (error) {
+      console.error('Error al extraer palabras clave:', error);
+      toast.error('Error al extraer palabras clave');
+    }
+  };
+
+  const handleProcess = async (docId) => {
+    try {
+      await processDocument(docId);
+      toast.success('Documento procesado exitosamente');
+      loadDocuments();
+    } catch (error) {
+      console.error('Error al procesar documento:', error);
+      toast.error('Error al procesar documento');
+    }
+  };
+
+  const handleDownload = async (docId, filename) => {
+    try {
+      const blob = await downloadDocument(docId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success('Documento descargado');
+    } catch (error) {
+      console.error('Error al descargar documento:', error);
+      toast.error('Error al descargar documento');
+    }
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  if (loading) {
+    return (
+      <div className="section-card">
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <span className="ml-3">Cargando documentos...</span>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="section-card">
-      <h3 className="heading">Cargar documento (PDF, MD, TXT)</h3>
-      <div className="mt-3" style={{ display: "flex", gap: 12, alignItems: "stretch", flexWrap: "wrap" }}>
-        <input
-          type="file"
-          accept=".pdf,.md,.txt,text/markdown,text/plain,application/pdf"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-          className="input"
-        />
-        <button className="btn-primary" disabled={!file || uploading} onClick={handleUpload}>
-          {uploading ? "Subiendo..." : "Subir y extraer palabras clave"}
-        </button>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Upload className="w-6 h-6" />
+          Gestión de Documentos
+        </h2>
+        <p className="text-sm text-gray-600 mt-1">
+          Sube y gestiona documentos para análisis
+        </p>
       </div>
 
-      <h4 className="font-semibold mt-5">Documentos</h4>
-      <ul className="mt-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        {(docs || []).map((d) => (
-          <li key={d.id}>
-            <button
-              onClick={() => handleSelectDoc(d.id)}
-              className="glass"
-              style={{ width: "100%", textAlign: "left", padding: "10px 12px", transition: "background 160ms ease" }}
-            >
-              <div className="font-semibold">
-                {d.title} <span className="subtle">({d.filename})</span>
-              </div>
-              <div className="subtle text-xs">{d.extracted ? "Palabras extraídas ✅" : "Pendiente ⏳"}</div>
-            </button>
-          </li>
-        ))}
-      </ul>
+      {/* Upload Section */}
+      <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-6 mb-6">
+        <div className="text-center">
+          <Upload className="mx-auto h-12 w-12 text-gray-400" />
+          <div className="mt-4">
+            <label htmlFor="file-input" className="cursor-pointer">
+              <span className="btn-primary inline-block">
+                Seleccionar archivo
+              </span>
+              <input
+                id="file-input"
+                type="file"
+                className="hidden"
+                onChange={handleFileSelect}
+                accept=".pdf,.doc,.docx,.txt,.md"
+              />
+            </label>
+          </div>
+          {selectedFile && (
+            <div className="mt-4">
+              <p className="text-sm text-gray-600">
+                Archivo seleccionado: <span className="font-medium">{selectedFile.name}</span>
+              </p>
+              <p className="text-xs text-gray-500">
+                Tamaño: {formatFileSize(selectedFile.size)}
+              </p>
+              <button
+                onClick={handleUpload}
+                disabled={uploading}
+                className="mt-3 btn-primary"
+              >
+                {uploading ? 'Subiendo...' : 'Subir documento'}
+              </button>
+            </div>
+          )}
+          <p className="text-xs text-gray-500 mt-2">
+            PDF, Word, TXT, Markdown hasta 10MB
+          </p>
+        </div>
+      </div>
 
-      {selectedDoc && (
-        <>
-          <h3 className="heading mt-6">Palabras clave del documento</h3>
-          <div className="mt-3 rounded-2xl" style={{ overflow: "hidden", border: "1px solid var(--border)" }}>
-            <table className="w-full text-sm" style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-              <thead style={{ background: "var(--primary-50)" }}>
-                <tr>
-                  <th className="text-left px-3 py-2">Palabra</th>
-                  <th className="text-left px-3 py-2">Peso</th>
-                  <th className="text-left px-3 py-2">Síntoma</th>
-                </tr>
-              </thead>
-              <tbody>
-                {docKeywords.map((k) => (
-                  <tr key={k.keyword} style={{ borderTop: "1px solid var(--border)" }}>
-                    <td className="px-3 py-2">{k.keyword}</td>
-                    <td className="px-3 py-2">{Number(k.weight).toFixed(3)}</td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={mapping[k.keyword] || k.symptom_type || ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setMapping((m) => {
-                            const next = { ...m };
-                            if (!v) delete next[k.keyword];
-                            else next[k.keyword] = v;
-                            return next;
-                          });
-                        }}
-                        className="select"
+      {/* Documents List */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold">Documentos ({documents.length})</h3>
+        
+        {documents.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            No hay documentos subidos
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {documents.map((doc) => (
+              <div
+                key={doc.id}
+                className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-3 flex-1">
+                    <File className="w-8 h-8 text-blue-500 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-900 truncate">
+                        {doc.title || doc.filename}
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formatFileSize(doc.size_bytes)}
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        {doc.extracted ? (
+                          <span className="flex items-center gap-1 text-xs text-green-600">
+                            <CheckCircle className="w-3 h-3" />
+                            Procesado
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-xs text-orange-600">
+                            <AlertCircle className="w-3 h-3" />
+                            Pendiente
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 ml-2">
+                    {!doc.extracted && (
+                      <button
+                        onClick={() => handleProcess(doc.id)}
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                        title="Procesar"
                       >
-                        <option value="">—</option>
-                        {SYMPTOM_TYPES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        <Upload className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleExtractKeywords(doc.id)}
+                      className="p-2 text-purple-600 hover:bg-purple-50 rounded"
+                      title="Extraer palabras clave"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDownload(doc.id, doc.filename)}
+                      className="p-2 text-green-600 hover:bg-green-50 rounded"
+                      title="Descargar"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(doc.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded"
+                      title="Eliminar"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
+        )}
+      </div>
 
-          <div className="mt-3">
-            <button className="btn-primary" disabled={!canSave || saving} onClick={handleApplyToLexicon}>
-              {saving ? "Guardando..." : "Agregar/Actualizar en léxico global"}
-            </button>
+      {/* Keywords Modal */}
+      {keywords.length > 0 && (
+        <div className="mt-6 p-4 bg-purple-50 rounded-lg">
+          <h4 className="font-semibold mb-2">Palabras clave extraídas:</h4>
+          <div className="flex flex-wrap gap-2">
+            {keywords.map((kw, idx) => (
+              <span
+                key={idx}
+                className="px-3 py-1 bg-white border border-purple-200 rounded-full text-sm"
+              >
+                {kw.keyword} {kw.weight && `(${kw.weight.toFixed(2)})`}
+              </span>
+            ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

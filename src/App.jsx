@@ -11,12 +11,35 @@ import SystemStatus from "./components/SystemStatus";
 import Login from "./components/Auth/Login";
 import Register from "./components/Auth/Register";
 import AdminPanel from "./components/AdminPanel";
+import PsychologistReports from "./components/PsychologistReports";
+import RoleManagement from "./components/RoleManagement";
 import { getUserInfo } from "./services/api";
+import { ROLES, hasPermission, PERMISSIONS } from "./utils/permissions";
 
-function RequireAuth({ children, roles }) {
+// Componente para rutas que requieren autenticación
+function RequireAuth({ children, roles, permission }) {
   const u = getUserInfo() || {};
-  if (!u?.username) return <Navigate to="/login" replace />;
-  if (roles && roles.length > 0 && !roles.includes(u.role)) return <Navigate to="/chat" replace />;
+  
+  // Si no hay usuario y se requiere autenticación
+  if (!u?.username && roles && roles.length > 0) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  // Verificar roles si se especifican
+  if (roles && roles.length > 0 && !roles.includes(u.role)) {
+    return <Navigate to="/chat" replace />;
+  }
+  
+  // Verificar permisos si se especifican
+  if (permission && !hasPermission(u.role, permission)) {
+    return <Navigate to="/chat" replace />;
+  }
+  
+  return children;
+}
+
+// Componente para rutas públicas (invitados pueden acceder)
+function PublicRoute({ children }) {
   return children;
 }
 
@@ -31,13 +54,81 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
 
-          <Route path="/chat" element={<ChatInterface mode="standard" />} />
-          <Route path="/chat/conversational" element={<ChatInterface mode="conversational" />} />
-          <Route path="/history" element={<HistoryView />} />
-          <Route path="/dashboard" element={<RequireAuth roles={["psychologist","admin"]}><Dashboard /></RequireAuth>} />
-          <Route path="/admin" element={<RequireAuth roles={["admin"]}><AdminPanel /></RequireAuth>} />
-          <Route path="/status" element={<SystemStatus />} />
-          <Route path="*" element={<div className="section-card">404</div>} />
+          {/* Rutas públicas - Invitados pueden acceder */}
+          <Route 
+            path="/chat" 
+            element={
+              <PublicRoute>
+                <ChatInterface mode="standard" />
+              </PublicRoute>
+            } 
+          />
+          <Route 
+            path="/chat/conversational" 
+            element={
+              <PublicRoute>
+                <ChatInterface mode="conversational" />
+              </PublicRoute>
+            } 
+          />
+
+          {/* Rutas para usuarios autenticados */}
+          <Route 
+            path="/history" 
+            element={
+              <RequireAuth roles={[ROLES.USER, ROLES.ADMIN]} permission={PERMISSIONS.VIEW_OWN_HISTORY}>
+                <HistoryView />
+              </RequireAuth>
+            } 
+          />
+
+          {/* Rutas para psicólogos */}
+          <Route 
+            path="/psychologist-reports" 
+            element={
+              <RequireAuth roles={[ROLES.PSYCHOLOGIST, ROLES.ADMIN]} permission={PERMISSIONS.VIEW_PSYCHOLOGIST_REPORTS}>
+                <PsychologistReports />
+              </RequireAuth>
+            } 
+          />
+
+          {/* Rutas para psicólogos y admin */}
+          <Route 
+            path="/dashboard" 
+            element={
+              <RequireAuth roles={[ROLES.PSYCHOLOGIST, ROLES.ADMIN]} permission={PERMISSIONS.VIEW_DASHBOARD}>
+                <Dashboard />
+              </RequireAuth>
+            } 
+          />
+
+          {/* Rutas solo para administradores */}
+          <Route 
+            path="/admin" 
+            element={
+              <RequireAuth roles={[ROLES.ADMIN]} permission={PERMISSIONS.VIEW_ADMIN_PANEL}>
+                <AdminPanel />
+              </RequireAuth>
+            } 
+          />
+          <Route 
+            path="/admin/roles" 
+            element={
+              <RequireAuth roles={[ROLES.ADMIN]} permission={PERMISSIONS.MANAGE_ROLES}>
+                <RoleManagement />
+              </RequireAuth>
+            } 
+          />
+          <Route 
+            path="/status" 
+            element={
+              <RequireAuth roles={[ROLES.ADMIN]} permission={PERMISSIONS.VIEW_SYSTEM_STATUS}>
+                <SystemStatus />
+              </RequireAuth>
+            } 
+          />
+
+          <Route path="*" element={<div className="section-card">404 - Página no encontrada</div>} />
         </Routes>
       </div>
     </BrowserRouter>

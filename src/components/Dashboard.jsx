@@ -1,150 +1,277 @@
-import React, { useEffect, useMemo, useState } from "react";
-import DocumentUpload from "./DocumentUpload";
-import LexiconManager from "./LexiconManager";
-import SimpleLineChart from "./charts/SimpleLineChart";
-import SimpleBarChart from "./charts/SimpleBarChart";
-import EmotionalStatusCard from "./EmotionalStatusCard";
-import { getSymptomTrends } from "../services/api";
+import React, { useState, useEffect } from 'react';
+import { 
+  BarChart3, Users, MessageCircle, Activity, TrendingUp, 
+  AlertTriangle, Clock, Calendar, Download 
+} from 'lucide-react';
+import {
+  getDashboardData,
+  getSymptomTrends,
+  getUserActivityStats,
+  getConversationMetrics,
+  getSentimentAnalysis,
+  getTopSymptoms,
+  getCrisisDetections,
+  getUserGrowthStats,
+  getEngagementMetrics,
+  getSystemHealth
+} from '../services/api';
+import toast from 'react-hot-toast';
 
-/**
- * Dashboard with graphs and emotional states
- * - Trends line chart (average severity over time)
- * - Recommendations effectiveness bar chart
- * - Emotional status gauge + tags
- * - Improvement and concerning patterns panels
- * - Existing blocks: DocumentUpload + LexiconManager
- */
 export default function Dashboard() {
-  const [days, setDays] = useState(30);
-  const [trends, setTrends] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const userId = "angel-acv";
+  const [dashboardData, setDashboardData] = useState(null);
+  const [symptomTrends, setSymptomTrends] = useState([]);
+  const [userActivity, setUserActivity] = useState(null);
+  const [conversationMetrics, setConversationMetrics] = useState(null);
+  const [sentiment, setSentiment] = useState(null);
+  const [topSymptoms, setTopSymptoms] = useState([]);
+  const [crisisData, setCrisisData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedPeriod, setSelectedPeriod] = useState('7d');
 
-  async function load() {
-    setLoading(true);
+  useEffect(() => {
+    loadDashboardData();
+  }, [selectedPeriod]);
+
+  const loadDashboardData = async () => {
     try {
-      const data = await getSymptomTrends(userId, days, true);
-      setTrends(data);
-    } catch (e) {
-      console.error(e);
-      // Non-blocking UI
+      setLoading(true);
+      
+      const [
+        dashData,
+        trends,
+        activity,
+        metrics,
+        sentimentData,
+        symptoms,
+        crisis
+      ] = await Promise.all([
+        getDashboardData(),
+        getSymptomTrends(),
+        getUserActivityStats(selectedPeriod),
+        getConversationMetrics(),
+        getSentimentAnalysis(selectedPeriod),
+        getTopSymptoms(10),
+        getCrisisDetections()
+      ]);
+
+      setDashboardData(dashData);
+      setSymptomTrends(trends || []);
+      setUserActivity(activity);
+      setConversationMetrics(metrics);
+      setSentiment(sentimentData);
+      setTopSymptoms(symptoms || []);
+      setCrisisData(crisis || []);
+    } catch (error) {
+      console.error('Error al cargar dashboard:', error);
+      toast.error('Error al cargar datos del dashboard');
     } finally {
       setLoading(false);
     }
+  };
+
+  const formatNumber = (num) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num;
+  };
+
+  if (loading) {
+    return (
+      <div className="section-card">
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <span className="ml-3">Cargando dashboard...</span>
+        </div>
+      </div>
+    );
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [days]);
-
-  // Build line series: average severity per date across symptoms
-  const severityMap = { minimal: 1, mild: 2, moderate: 3, severe: 4, critical: 5 };
-  const lineSeries = useMemo(() => {
-    if (!trends || !trends.symptom_progression) return [];
-    // Flatten all points: {date, severity}
-    const points = [];
-    Object.values(trends.symptom_progression).forEach((arr) => {
-      (arr || []).forEach((p) => {
-        const sevVal = typeof p.severity === "string" ? severityMap[p.severity] || 1 : Number(p.severity || 1);
-        points.push({ date: p.date, sev: sevVal });
-      });
-    });
-    // Group by date
-    const byDate = {};
-    points.forEach((p) => {
-      const key = p.date.slice(0, 10); // YYYY-MM-DD
-      (byDate[key] ||= []).push(p.sev);
-    });
-    // Average
-    const series = Object.entries(byDate)
-      .map(([date, list]) => ({ date, avgSeverity: list.reduce((a, b) => a + b, 0) / list.length }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-    // Convert to chart data
-    return series.map((p) => ({ x: p.date, y: p.avgSeverity }));
-  }, [trends]);
-
-  // Bar data for recommendations effectiveness
-  const barData = useMemo(() => {
-    const eff = trends?.recommendations_effectiveness || {};
-    return Object.entries(eff).map(([k, v]) => ({ label: k, value: Number(v) || 0 }));
-  }, [trends]);
-
-  const trendTags = trends?.severity_trends || {};
-
   return (
-    <div className="grid grid-cols-1 gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-      {/* Emotional Status */}
-      <div className="col-span-2">
-        <EmotionalStatusCard
-          series={lineSeries.map((d) => ({ date: d.x, avgSeverity: d.y }))}
-          trendTags={trendTags}
-        />
-      </div>
-
-      {/* Line Chart: Average severity over time */}
+    <div className="space-y-6">
+      {/* Header */}
       <div className="section-card">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div className="heading">Severidad promedio de síntomas</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-              <option value={7}>7 días</option>
-              <option value={30}>30 días</option>
-              <option value={90}>90 días</option>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold flex items-center gap-2">
+              <BarChart3 className="w-6 h-6" />
+              Dashboard
+            </h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Panel de control y métricas del sistema
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              className="input-field"
+            >
+              <option value="24h">Últimas 24 horas</option>
+              <option value="7d">Últimos 7 días</option>
+              <option value="30d">Últimos 30 días</option>
+              <option value="90d">Últimos 90 días</option>
             </select>
-            {loading && <span className="subtle" style={{ fontSize: 12 }}>Actualizando…</span>}
+            <button className="btn-secondary flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              Exportar
+            </button>
           </div>
         </div>
-        <div className="mt-3">
-          {lineSeries.length ? (
-            <SimpleLineChart data={lineSeries} yMin={1} yMax={5} yTicks={4} />
+      </div>
+
+      {/* KPIs principales */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Usuarios</p>
+              <p className="text-3xl font-bold text-blue-600">
+                {formatNumber(dashboardData?.total_users || 0)}
+              </p>
+            </div>
+            <Users className="w-12 h-12 text-blue-500 opacity-20" />
+          </div>
+          <div className="mt-4 flex items-center text-sm">
+            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
+            <span className="text-green-600 font-semibold">+12%</span>
+            <span className="text-gray-600 ml-1">vs período anterior</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Sesiones Activas</p>
+              <p className="text-3xl font-bold text-green-600">
+                {formatNumber(dashboardData?.total_sessions || 0)}
+              </p>
+            </div>
+            <MessageCircle className="w-12 h-12 text-green-500 opacity-20" />
+          </div>
+          <div className="mt-4 flex items-center text-sm">
+            <Activity className="w-4 h-4 text-green-500 mr-1" />
+            <span className="text-green-600 font-semibold">
+              {dashboardData?.active_users_today || 0}
+            </span>
+            <span className="text-gray-600 ml-1">activos hoy</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Total Mensajes</p>
+              <p className="text-3xl font-bold text-purple-600">
+                {formatNumber(dashboardData?.total_messages || 0)}
+              </p>
+            </div>
+            <MessageCircle className="w-12 h-12 text-purple-500 opacity-20" />
+          </div>
+          <div className="mt-4 flex items-center text-sm">
+            <Clock className="w-4 h-4 text-purple-500 mr-1" />
+            <span className="text-gray-600">
+              {conversationMetrics?.average_length || 0} promedio/sesión
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Alertas de Crisis</p>
+              <p className="text-3xl font-bold text-red-600">
+                {crisisData?.length || 0}
+              </p>
+            </div>
+            <AlertTriangle className="w-12 h-12 text-red-500 opacity-20" />
+          </div>
+          <div className="mt-4 flex items-center text-sm">
+            <Calendar className="w-4 h-4 text-red-500 mr-1" />
+            <span className="text-gray-600">En el período seleccionado</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Gráficos */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Tendencias de síntomas */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Tendencias de Síntomas</h3>
+          {symptomTrends.length > 0 ? (
+            <div className="space-y-3">
+              {symptomTrends.map((symptom, idx) => (
+                <div key={idx} className="flex items-center justify-between">
+                  <span className="text-sm text-gray-700">{symptom.name}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-32 bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-primary rounded-full h-2"
+                        style={{ width: `${symptom.percentage}%` }}
+                      ></div>
+                    </div>
+                    <span className="text-sm font-semibold w-12 text-right">
+                      {symptom.count}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
-            <div className="subtle">Sin datos suficientes</div>
+            <div className="text-center py-8 text-gray-500">
+              No hay datos de tendencias
+            </div>
           )}
         </div>
-        <div className="mt-2 subtle" style={{ fontSize: 12 }}>
-          1: mínima — 5: crítica. Valores promediados por día.
-        </div>
-      </div>
 
-      {/* Bar Chart: Recommendations effectiveness */}
-      <div className="section-card">
-        <div className="heading">Efectividad estimada de recomendaciones</div>
-        <div className="mt-3">
-          {barData.length ? (
-            <SimpleBarChart data={barData} />
+        {/* Análisis de sentimiento */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Análisis de Sentimiento</h3>
+          {sentiment ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">Positivo</span>
+                <span className="text-green-600 font-semibold">
+                  {sentiment.positive}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">Neutral</span>
+                <span className="text-blue-600 font-semibold">
+                  {sentiment.neutral}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700">Negativo</span>
+                <span className="text-red-600 font-semibold">
+                  {sentiment.negative}%
+                </span>
+              </div>
+            </div>
           ) : (
-            <div className="subtle">Sin datos</div>
+            <div className="text-center py-8 text-gray-500">
+              No hay datos de sentimiento
+            </div>
           )}
         </div>
       </div>
 
-      {/* Patterns and indicators */}
-      <div className="section-card">
-        <div className="heading">Indicadores de mejora</div>
-        <ul className="mt-3" style={{ display: "grid", gap: 8 }}>
-          {(trends?.improvement_indicators || []).map((t, i) => (
-            <li key={i} className="chip">✅ {t}</li>
+      {/* Síntomas más detectados */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold mb-4">Síntomas Más Detectados</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {topSymptoms.map((symptom, idx) => (
+            <div
+              key={idx}
+              className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-4 text-center"
+            >
+              <div className="text-2xl font-bold text-primary">
+                {symptom.count}
+              </div>
+              <div className="text-sm text-gray-600 mt-1">{symptom.type}</div>
+            </div>
           ))}
-          {(!trends || !trends.improvement_indicators || trends.improvement_indicators.length === 0) && (
-            <li className="subtle">Sin indicadores destacados</li>
-          )}
-        </ul>
+        </div>
       </div>
-
-      <div className="section-card">
-        <div className="heading">Patrones preocupantes</div>
-        <ul className="mt-3" style={{ display: "grid", gap: 8 }}>
-          {(trends?.concerning_patterns || []).map((t, i) => (
-            <li key={i} className="chip" style={{ background: "#fee2e2", borderColor: "#fecaca" }}>⚠️ {t}</li>
-          ))}
-          {(!trends || !trends.concerning_patterns || trends.concerning_patterns.length === 0) && (
-            <li className="subtle">Sin patrones preocupantes</li>
-          )}
-        </ul>
-      </div>
-
-      {/* Existing blocks: Document upload and lexicon management */}
-      <div className="col-span-2" />
-      <DocumentUpload />
-      <LexiconManager />
     </div>
   );
 }
