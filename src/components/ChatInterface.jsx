@@ -25,7 +25,7 @@ export default function ChatInterface({ mode = "standard" }) {
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [last, setLast] = useState(null);
-  const userId = "angel-acv";
+  const userId = "current_user"; // Reemplazar con ID de usuario real
 
   const convo = useConversationalChat(userId);
 
